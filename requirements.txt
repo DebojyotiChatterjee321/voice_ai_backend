@@ -1,0 +1,76 @@
+# Core Dependencies
+# python>=3.12.8,<3.13.0
+
+# FastAPI Core
+fastapi
+uvicorn[standard]
+
+# Database
+sqlalchemy
+asyncpg
+psycopg2-binary
+databases[postgresql]
+alembic
+
+# WebSocket Support
+websockets==12.0
+
+# Pipecat for real-time AI pipelines
+pipecat-ai
+
+# AI/ML Libraries
+--find-links https://download.pytorch.org/whl/torch_stable.html
+torch
+openai
+openai-whisper
+elevenlabs
+
+# Data Validation
+pydantic
+pydantic-settings
+
+# Configuration
+python-dotenv
+
+# HTTP Client
+httpx
+
+# Audio Processing (for real-time audio)
+pyaudio
+sounddevice
+numpy
+scipy
+pydub
+librosa
+
+# Real-time Processing
+asyncio-mqtt
+redis
+aioredis
+
+# WebRTC for low-latency audio/video
+aiortc
+av
+
+# Logging and Monitoring
+structlog
+prometheus-client
+
+# Development and Testing
+pytest
+pytest-asyncio
+black
+flake8
+mypy
+anyio
+
+# Security
+python-jose[cryptography]
+passlib[bcrypt]
+cryptography>=41.0.0  # Required by python-jose and aiortc
+
+# CORS and File Upload
+python-multipart
+
+# Environment specific
+python-json-logger

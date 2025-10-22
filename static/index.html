@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Assistant AI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .recording {
+            animation: pulse 1.5s ease-in-out infinite alternate;
+        }
+        
+        @keyframes pulse {
+            from { transform: scale(1); }
+            to { transform: scale(1.05); }
+        }
+        
+        .conversation-item {
+            transition: all 0.3s ease;
+        }
+        
+        .conversation-item:hover {
+            transform: translateX(4px);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-4xl">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-gray-800 mb-2">🎤 Voice Assistant AI</h1>
+            <p class="text-gray-600">Click record, speak, and get AI-powered responses with voice synthesis</p>
+        </div>
+
+        <!-- Connection Status -->
+        <div class="bg-white rounded-lg shadow-md p-4 mb-6">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-2">
+                    <div id="connection-indicator" class="w-3 h-3 bg-red-500 rounded-full"></div>
+                    <span id="connection-status" class="text-sm font-medium">Disconnected</span>
+                </div>
+                <div class="text-sm text-gray-500">
+                    Session: <span id="session-id" class="font-mono">Not connected</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Voice Controls -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <div class="text-center">
+                <button 
+                    id="record-btn" 
+                    class="bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white font-bold py-4 px-8 rounded-full text-lg transition-all duration-200 mb-4"
+                    disabled
+                >
+                    🎤 Start Recording
+                </button>
+                
+                <div id="recording-status" class="text-sm text-gray-600 mb-4 h-6">
+                    Connect to start recording
+                </div>
+                
+                <!-- Audio Level Indicator -->
+                <div class="w-full bg-gray-200 rounded-full h-2 mb-4">
+                    <div id="audio-level" class="bg-green-500 h-2 rounded-full transition-all duration-100" style="width: 0%"></div>
+                </div>
+                
+                <!-- Text Input Alternative -->
+                <div class="mt-4 pt-4 border-t border-gray-200">
+                    <div class="flex space-x-2">
+                        <input 
+                            id="text-input" 
+                            type="text" 
+                            placeholder="Or type your message here..."
+                            class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            disabled
+                        >
+                        <button 
+                            id="send-text-btn"
+                            class="bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white px-6 py-2 rounded-lg transition-colors"
+                            disabled
+                        >
+                            Send
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Processing Status -->
+        <div id="processing-status" class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6 hidden">
+            <div class="flex items-center space-x-2">
+                <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-600"></div>
+                <span class="text-yellow-800 font-medium">Processing your request...</span>
+            </div>
+            <div id="processing-details" class="text-sm text-yellow-700 mt-2"></div>
+        </div>
+
+        <!-- Conversation History -->
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">💬 Conversation</h2>
+            <div id="conversation" class="space-y-4 max-h-96 overflow-y-auto">
+                <div class="text-gray-500 text-center py-8">
+                    Start a conversation by recording your voice or typing a message
+                </div>
+            </div>
+        </div>
+
+        <!-- Debug Info (Hidden by default) -->
+        <div id="debug-panel" class="bg-gray-50 rounded-lg p-4 mt-6 hidden">
+            <h3 class="font-semibold text-gray-700 mb-2">Debug Information</h3>
+            <pre id="debug-content" class="text-xs text-gray-600 overflow-auto max-h-32"></pre>
+        </div>
+    </div>
+
+    <!-- Audio playback element -->
+    <audio id="response-audio" class="hidden"></audio>
+
+    <script>
+        class VoiceAssistant {
+            constructor() {
+                this.ws = null;
+                this.sessionId = null;
+                this.isRecording = false;
+                this.isProcessing = false;
+                this.mediaRecorder = null;
+                this.audioChunks = [];
+                this.audioContext = null;
+                this.analyser = null;
+                this.microphone = null;
+                this.dataArray = null;
+                
+                this.initializeElements();
+                this.setupEventListeners();
+                this.connect();
+            }
+            
+            initializeElements() {
+                this.elements = {
+                    connectionIndicator: document.getElementById('connection-indicator'),
+                    connectionStatus: document.getElementById('connection-status'),
+                    sessionIdDisplay: document.getElementById('session-id'),
+                    recordBtn: document.getElementById('record-btn'),
+                    recordingStatus: document.getElementById('recording-status'),
+                    audioLevel: document.getElementById('audio-level'),
+                    textInput: document.getElementById('text-input'),
+                    sendTextBtn: document.getElementById('send-text-btn'),
+                    processingStatus: document.getElementById('processing-status'),
+                    processingDetails: document.getElementById('processing-details'),
+                    conversation: document.getElementById('conversation'),
+                    responseAudio: document.getElementById('response-audio'),
+                    debugPanel: document.getElementById('debug-panel'),
+                    debugContent: document.getElementById('debug-content')
+                };
+            }
+            
+            setupEventListeners() {
+                this.elements.recordBtn.addEventListener('click', () => this.toggleRecording());
+                this.elements.sendTextBtn.addEventListener('click', () => this.sendTextMessage());
+                this.elements.textInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') this.sendTextMessage();
+                });
+                
+                // Debug panel toggle (double-click header)
+                document.querySelector('h1').addEventListener('dblclick', () => {
+                    this.elements.debugPanel.classList.toggle('hidden');
+                });
+            }
+            
+            connect() {
+                const wsUrl = `ws://localhost:8000/ws`;
+                this.ws = new WebSocket(wsUrl);
+                
+                this.ws.onopen = () => {
+                    this.updateConnectionStatus(true);
+                    this.log('Connected to voice assistant');
+                };
+                
+                this.ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    this.handleMessage(data);
+                };
+                
+                this.ws.onclose = () => {
+                    this.updateConnectionStatus(false);
+                    this.log('Disconnected from voice assistant');
+                    // Attempt reconnection after 3 seconds
+                    setTimeout(() => this.connect(), 3000);
+                };
+                
+                this.ws.onerror = (error) => {
+                    this.log('WebSocket error:', error);
+                };
+            }
+            
+            updateConnectionStatus(connected) {
+                if (connected) {
+                    this.elements.connectionIndicator.className = 'w-3 h-3 bg-green-500 rounded-full';
+                    this.elements.connectionStatus.textContent = 'Connected';
+                    this.elements.recordBtn.disabled = false;
+                    this.elements.textInput.disabled = false;
+                    this.elements.sendTextBtn.disabled = false;
+                    this.elements.recordingStatus.textContent = 'Ready to record';
+                } else {
+                    this.elements.connectionIndicator.className = 'w-3 h-3 bg-red-500 rounded-full';
+                    this.elements.connectionStatus.textContent = 'Disconnected';
+                    this.elements.recordBtn.disabled = true;
+                    this.elements.textInput.disabled = true;
+                    this.elements.sendTextBtn.disabled = true;
+                    this.elements.recordingStatus.textContent = 'Connect to start recording';
+                    this.sessionId = null;
+                    this.elements.sessionIdDisplay.textContent = 'Not connected';
+                }
+            }
+            
+            async toggleRecording() {
+                if (this.isRecording) {
+                    await this.stopRecording();
+                } else {
+                    await this.startRecording();
+                }
+            }
+            
+            async startRecording() {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ 
+                        audio: {
+                            sampleRate: 16000,
+                            channelCount: 1,
+                            echoCancellation: true,
+                            noiseSuppression: true
+                        } 
+                    });
+                    
+                    // Setup audio context for level monitoring
+                    this.audioContext = new AudioContext({ sampleRate: 16000 });
+                    this.analyser = this.audioContext.createAnalyser();
+                    this.microphone = this.audioContext.createMediaStreamSource(stream);
+                    this.microphone.connect(this.analyser);
+                    this.analyser.fftSize = 256;
+                    this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+                    
+                    // Start level monitoring
+                    this.monitorAudioLevel();
+                    
+                    // Setup media recorder
+                    this.mediaRecorder = new MediaRecorder(stream, {
+                        mimeType: 'audio/webm;codecs=opus'
+                    });
+                    
+                    this.audioChunks = [];
+                    
+                    this.mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0) {
+                            this.audioChunks.push(event.data);
+                        }
+                    };
+                    
+                    this.mediaRecorder.onstop = () => {
+                        this.processRecording();
+                    };
+                    
+                    this.mediaRecorder.start();
+                    this.isRecording = true;
+                    
+                    this.elements.recordBtn.textContent = '⏹️ Stop Recording';
+                    this.elements.recordBtn.classList.add('recording', 'bg-red-500', 'hover:bg-red-600');
+                    this.elements.recordBtn.classList.remove('bg-blue-500', 'hover:bg-blue-600');
+                    this.elements.recordingStatus.textContent = 'Recording... Click to stop';
+                    
+                } catch (error) {
+                    this.log('Error starting recording:', error);
+                    alert('Could not access microphone. Please check permissions.');
+                }
+            }
+            
+            async stopRecording() {
+                if (this.mediaRecorder && this.isRecording) {
+                    this.mediaRecorder.stop();
+                    this.isRecording = false;
+                    
+                    // Stop audio monitoring
+                    if (this.audioContext) {
+                        this.audioContext.close();
+                    }
+                    
+                    this.elements.recordBtn.textContent = '🎤 Start Recording';
+                    this.elements.recordBtn.classList.remove('recording', 'bg-red-500', 'hover:bg-red-600');
+                    this.elements.recordBtn.classList.add('bg-blue-500', 'hover:bg-blue-600');
+                    this.elements.recordingStatus.textContent = 'Processing recording...';
+                    this.elements.audioLevel.style.width = '0%';
+                }
+            }
+            
+            monitorAudioLevel() {
+                if (!this.isRecording || !this.analyser) return;
+                
+                this.analyser.getByteFrequencyData(this.dataArray);
+                const average = this.dataArray.reduce((sum, value) => sum + value, 0) / this.dataArray.length;
+                const percentage = Math.min((average / 128) * 100, 100);
+                
+                this.elements.audioLevel.style.width = `${percentage}%`;
+                
+                if (this.isRecording) {
+                    requestAnimationFrame(() => this.monitorAudioLevel());
+                }
+            }
+            
+            async processRecording() {
+                if (this.audioChunks.length === 0) return;
+                if (this.isProcessing) return; // Prevent multiple simultaneous processing
+                
+                this.isProcessing = true;
+                
+                try {
+                    const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm;codecs=opus' });
+                    const arrayBuffer = await audioBlob.arrayBuffer();
+                    const base64Audio = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+                    
+                    this.sendVoiceData(base64Audio);
+                    this.elements.recordingStatus.textContent = 'Ready to record';
+                    
+                    // Clear audio chunks after processing
+                    this.audioChunks = [];
+                } catch (error) {
+                    console.error('Error processing recording:', error);
+                } finally {
+                    this.isProcessing = false;
+                }
+            }
+            
+            sendVoiceData(audioData) {
+                if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                    alert('Not connected to server');
+                    return;
+                }
+                
+                const message = {
+                    type: 'voice_data',
+                    data: audioData,
+                    data_type: 'base64',
+                    session_id: this.sessionId
+                };
+                
+                this.ws.send(JSON.stringify(message));
+                this.showProcessingStatus('Processing voice input...');
+            }
+            
+            sendTextMessage() {
+                const text = this.elements.textInput.value.trim();
+                if (!text) return;
+                
+                if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                    alert('Not connected to server');
+                    return;
+                }
+                
+                const message = {
+                    type: 'text_message',
+                    text: text,
+                    session_id: this.sessionId
+                };
+                
+                this.ws.send(JSON.stringify(message));
+                this.elements.textInput.value = '';
+                this.showProcessingStatus('Processing text message...');
+                
+                // Add user message to conversation immediately
+                this.addToConversation('user', text);
+            }
+            
+            handleMessage(data) {
+                this.log('Received:', data);
+                
+                switch (data.type) {
+                    case 'connection_established':
+                        break;
+                        
+                    case 'session_created':
+                        this.sessionId = data.session_id;
+                        this.elements.sessionIdDisplay.textContent = data.session_id.substring(0, 8) + '...';
+                        break;
+                        
+                    case 'voice_processing':
+                    case 'text_processing':
+                        this.showProcessingStatus(data.message);
+                        break;
+                        
+                    case 'voice_response':
+                    case 'text_response':
+                    case 'processing_complete':
+                    case 'text_processing_complete':
+                        this.handleResponse(data);
+                        break;
+                        
+                    case 'error':
+                        this.hideProcessingStatus();
+                        alert(`Error: ${data.error || data.message}`);
+                        break;
+                        
+                    default:
+                        this.log('Unknown message type:', data.type);
+                }
+            }
+            
+            handleResponse(data) {
+                this.hideProcessingStatus();
+                
+                // Add to conversation
+                if (data.transcribed_text) {
+                    this.addToConversation('user', data.transcribed_text);
+                }
+                
+                if (data.response_text) {
+                    this.addToConversation('assistant', data.response_text, data);
+                }
+                
+                // Play audio response
+                if (data.audio_data) {
+                    this.playAudioResponse(data.audio_data);
+                }
+            }
+            
+            addToConversation(role, message, metadata = null) {
+                const conversationDiv = this.elements.conversation;
+                
+                // Remove placeholder if it exists
+                if (conversationDiv.children.length === 1 && 
+                    conversationDiv.children[0].textContent.includes('Start a conversation')) {
+                    conversationDiv.innerHTML = '';
+                }
+                
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'conversation-item p-4 rounded-lg';
+                
+                if (role === 'user') {
+                    messageDiv.className += ' bg-blue-50 border-l-4 border-blue-500 ml-8';
+                    messageDiv.innerHTML = `
+                        <div class="flex items-start space-x-2">
+                            <div class="text-blue-600 font-semibold">👤 You:</div>
+                            <div class="text-gray-800">${this.escapeHtml(message)}</div>
+                        </div>
+                    `;
+                } else {
+                    messageDiv.className += ' bg-green-50 border-l-4 border-green-500 mr-8';
+                    
+                    let metadataHtml = '';
+                    if (metadata && metadata.processing_time) {
+                        metadataHtml = `
+                            <div class="text-xs text-gray-500 mt-2">
+                                ⚡ ${(metadata.processing_time * 1000).toFixed(0)}ms 
+                                ${metadata.breakdown ? 
+                                    `(STT: ${(metadata.breakdown.stt * 1000).toFixed(0)}ms, 
+                                     LLM: ${(metadata.breakdown.llm * 1000).toFixed(0)}ms, 
+                                     TTS: ${(metadata.breakdown.tts * 1000).toFixed(0)}ms)` : ''}
+                            </div>
+                        `;
+                    }
+                    
+                    messageDiv.innerHTML = `
+                        <div class="flex items-start space-x-2">
+                            <div class="text-green-600 font-semibold">🤖 AI:</div>
+                            <div class="flex-1">
+                                <div class="text-gray-800">${this.escapeHtml(message)}</div>
+                                ${metadataHtml}
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                conversationDiv.appendChild(messageDiv);
+                conversationDiv.scrollTop = conversationDiv.scrollHeight;
+            }
+            
+            playAudioResponse(base64Audio) {
+                try {
+                    const audioBlob = this.base64ToBlob(base64Audio, 'audio/mpeg');
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    
+                    this.elements.responseAudio.src = audioUrl;
+                    this.elements.responseAudio.play();
+                    
+                    // Clean up URL after playing
+                    this.elements.responseAudio.onended = () => {
+                        URL.revokeObjectURL(audioUrl);
+                    };
+                } catch (error) {
+                    this.log('Error playing audio:', error);
+                }
+            }
+            
+            base64ToBlob(base64, mimeType) {
+                const byteCharacters = atob(base64);
+                const byteNumbers = new Array(byteCharacters.length);
+                
+                for (let i = 0; i < byteCharacters.length; i++) {
+                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                }
+                
+                const byteArray = new Uint8Array(byteNumbers);
+                return new Blob([byteArray], { type: mimeType });
+            }
+            
+            showProcessingStatus(message) {
+                this.elements.processingStatus.classList.remove('hidden');
+                this.elements.processingDetails.textContent = message;
+            }
+            
+            hideProcessingStatus() {
+                this.elements.processingStatus.classList.add('hidden');
+            }
+            
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+            
+            log(...args) {
+                console.log('[VoiceAssistant]', ...args);
+                
+                // Update debug panel
+                const debugContent = this.elements.debugContent;
+                const timestamp = new Date().toLocaleTimeString();
+                const logLine = `[${timestamp}] ${args.map(arg => 
+                    typeof arg === 'object' ? JSON.stringify(arg, null, 2) : arg
+                ).join(' ')}\n`;
+                
+                debugContent.textContent = (debugContent.textContent + logLine)
+                    .split('\n')
+                    .slice(-50) // Keep last 50 lines
+                    .join('\n');
+                
+                debugContent.scrollTop = debugContent.scrollHeight;
+            }
+        }
+        
+        // Initialize the voice assistant when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new VoiceAssistant();
+        });
+    </script>
+</body>
+</html>
