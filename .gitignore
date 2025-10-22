@@ -96,4 +96,6 @@ ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
 
+# Other
+docs/
 # End of https://www.toptal.com/developers/gitignore/api/python
