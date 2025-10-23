@@ -1,19 +1,19 @@
 """
 Services package for Voice Assistant AI Backend.
 Contains STT, LLM, and TTS services for real-time processing.
+Tier 2: Includes Groq integration and service selector with fallback.
 """
 
+# Import legacy services (for backward compatibility)
 from .stt import (
     WhisperSTTService,
-    stt_service,
-    transcribe_audio,
+    stt_service as legacy_stt_service,
     initialize_stt
 )
 
 from .llm import (
     OpenAILLMService,
-    llm_service,
-    generate_response,
+    llm_service as legacy_llm_service,
     analyze_and_respond,
     initialize_llm
 )
@@ -25,6 +25,23 @@ from .tts import (
     synthesize_streaming,
     initialize_tts
 )
+
+# Import Tier 2 services
+from .service_selector import (
+    service_selector,
+    transcribe_audio,
+    generate_response,
+    initialize_services
+)
+
+from .vad import (
+    vad_service,
+    initialize_vad
+)
+
+# Expose both legacy and new services
+stt_service = service_selector  # Use service selector by default
+llm_service = service_selector  # Use service selector by default
 
 # Export all services
 __all__ = [
@@ -46,7 +63,13 @@ __all__ = [
     "tts_service",
     "synthesize_speech",
     "synthesize_streaming",
-    "initialize_tts"
+    "initialize_tts",
+    
+    # Tier 2 Services
+    "service_selector",
+    "vad_service",
+    "initialize_services",
+    "initialize_vad"
 ]
 
 

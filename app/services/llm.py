@@ -8,10 +8,12 @@ import logging
 import time
 from typing import Optional, Dict, Any, List, AsyncGenerator
 import json
+import hashlib
 
 import openai
 from openai import AsyncOpenAI
 import httpx
+import redis.asyncio as redis
 
 from app.config import settings
 from app.models import Customer, Product, Order
@@ -28,11 +30,13 @@ class OpenAILLMService:
         self.model = settings.openai_model
         self.max_tokens = settings.openai_max_tokens
         self.is_initialized = False
+        self.cache = None  # Redis cache client
         
         # Performance settings
         self.temperature = 0.1  # Low temperature for consistent responses
         self.timeout = 10.0  # 10 second timeout
         self.max_context_length = 4000  # Keep context short for speed
+        self.cache_ttl = 3600  # Cache responses for 1 hour
         
         # Customer support system prompt
         self.system_prompt = """You are a helpful customer support AI assistant for an e-commerce platform. 
@@ -68,6 +72,19 @@ Response format: Keep it brief and direct."""
                 max_retries=2
             )
             
+            # Initialize Redis cache
+            try:
+                self.cache = await redis.from_url(
+                    settings.redis_url,
+                    encoding="utf-8",
+                    decode_responses=True
+                )
+                await self.cache.ping()
+                logger.info("Redis cache connected successfully")
+            except Exception as cache_error:
+                logger.warning(f"Redis cache initialization failed: {cache_error}. Continuing without cache.")
+                self.cache = None
+            
             # Test connection with a simple request
             await self._test_connection()
             
@@ -92,6 +109,20 @@ Response format: Keep it brief and direct."""
             logger.error(f"OpenAI API connection test failed: {e}")
             raise
     
+    def _generate_cache_key(self, user_message: str, context: Optional[Dict[str, Any]] = None) -> str:
+        """Generate cache key for response caching."""
+        # Normalize message for better cache hits
+        normalized = user_message.lower().strip()
+        
+        # Include context in cache key if present (personalized responses)
+        cache_data = {"message": normalized}
+        if context:
+            cache_data["context"] = str(sorted(context.items()))
+        
+        # Generate hash
+        cache_str = json.dumps(cache_data, sort_keys=True)
+        return f"llm:response:{hashlib.md5(cache_str.encode()).hexdigest()}"
+    
     async def generate_response(
         self,
         user_message: str,
@@ -99,7 +130,7 @@ Response format: Keep it brief and direct."""
         conversation_history: Optional[List[Dict[str, str]]] = None
     ) -> Dict[str, Any]:
         """
-        Generate response to user message.
+        Generate response to user message with caching support.
         
         Args:
             user_message: User's input message
@@ -114,34 +145,72 @@ Response format: Keep it brief and direct."""
         
         start_time = time.time()
         
+        # Check cache (only for non-conversational queries without history)
+        if self.cache and not conversation_history:
+            cache_key = self._generate_cache_key(user_message, context)
+            try:
+                cached_response = await self.cache.get(cache_key)
+                if cached_response:
+                    logger.info(f"Cache hit for query: {user_message[:50]}...")
+                    cached_data = json.loads(cached_response)
+                    cached_data["cached"] = True
+                    cached_data["processing_time"] = time.time() - start_time
+                    return cached_data
+            except Exception as e:
+                logger.warning(f"Cache read failed: {e}")
+        
         try:
             # Build messages
             messages = await self._build_messages(user_message, context, conversation_history)
             
-            # Generate response
+            # Generate response with streaming enabled for lower perceived latency
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
-                stream=False,  # Disable streaming for lower latency
+                stream=True,  # Enable streaming for lower perceived latency
                 presence_penalty=0.1,
                 frequency_penalty=0.1
             )
             
+            # Collect streaming response
+            assistant_message = ""
+            tokens_used = 0
+            finish_reason = None
+            
+            async for chunk in response:
+                if chunk.choices[0].delta.content is not None:
+                    assistant_message += chunk.choices[0].delta.content
+                if chunk.choices[0].finish_reason is not None:
+                    finish_reason = chunk.choices[0].finish_reason
+            
             processing_time = time.time() - start_time
             
-            # Extract response
-            assistant_message = response.choices[0].message.content.strip()
-            
-            return {
-                "response": assistant_message,
+            result = {
+                "response": assistant_message.strip(),
                 "processing_time": processing_time,
                 "model": self.model,
-                "tokens_used": response.usage.total_tokens,
+                "tokens_used": len(assistant_message.split()),  # Approximate token count
                 "success": True,
-                "finish_reason": response.choices[0].finish_reason
+                "finish_reason": finish_reason or "stop",
+                "cached": False
             }
+            
+            # Cache the response (only for non-conversational, non-personalized queries)
+            if self.cache and not conversation_history and not context:
+                cache_key = self._generate_cache_key(user_message, context)
+                try:
+                    await self.cache.setex(
+                        cache_key,
+                        self.cache_ttl,
+                        json.dumps(result)
+                    )
+                    logger.debug(f"Cached response for: {user_message[:50]}...")
+                except Exception as e:
+                    logger.warning(f"Cache write failed: {e}")
+            
+            return result
             
         except Exception as e:
             logger.error(f"LLM response generation failed: {e}")
@@ -319,9 +388,53 @@ User message: """ + user_message
                 "error": str(e)
             }
     
+    async def _extract_entities_fast(self, user_message: str) -> Dict[str, Any]:
+        """
+        Fast entity extraction using pattern matching instead of LLM.
+        Much faster than analyze_intent() for common patterns.
+        """
+        import re
+        entities = {}
+        
+        # Extract order ID patterns (ORD-12345, #12345, order 12345, etc.)
+        order_patterns = [
+            r'(?:order|ord|#)\s*[:-]?\s*([A-Z0-9]{3,})',
+            r'order\s+(?:number|id|#)?\s*([A-Z0-9]{3,})',
+        ]
+        for pattern in order_patterns:
+            match = re.search(pattern, user_message, re.IGNORECASE)
+            if match:
+                entities['order_id'] = match.group(1).upper()
+                break
+        
+        # Extract customer ID patterns
+        customer_patterns = [
+            r'(?:customer|cust|account)\s*[:-]?\s*([A-Z0-9]{3,})',
+            r'customer\s+(?:number|id|#)?\s*([A-Z0-9]{3,})',
+        ]
+        for pattern in customer_patterns:
+            match = re.search(pattern, user_message, re.IGNORECASE)
+            if match:
+                entities['customer_id'] = match.group(1).upper()
+                break
+        
+        # Extract product names (simple word extraction after "product", "item", etc.)
+        product_keywords = ['product', 'item', 'laptop', 'phone', 'tablet', 'headphones', 'watch']
+        for keyword in product_keywords:
+            if keyword in user_message.lower():
+                # Extract 1-3 words after the keyword
+                pattern = rf'{keyword}\s+([A-Za-z0-9\s]{{3,30}})'
+                match = re.search(pattern, user_message, re.IGNORECASE)
+                if match:
+                    entities['product_name'] = match.group(1).strip()
+                    break
+        
+        return entities
+    
     async def get_context_from_database(self, entities: Dict[str, Any]) -> Dict[str, Any]:
         """
         Fetch relevant context from database based on extracted entities.
+        Queries run in parallel for optimal performance.
         
         Args:
             entities: Extracted entities from intent analysis
@@ -334,14 +447,17 @@ User message: """ + user_message
         try:
             db = await get_database()
             
-            # Get customer info
+            # Build parallel query tasks
+            tasks = []
+            task_keys = []
+            
+            # Customer query
             if entities.get("customer_id"):
                 customer_query = "SELECT * FROM customers WHERE customer_id = :customer_id"
-                customer = await db.fetch_one(customer_query, {"customer_id": entities["customer_id"]})
-                if customer:
-                    context["customer"] = dict(customer)
+                tasks.append(db.fetch_one(customer_query, {"customer_id": entities["customer_id"]}))
+                task_keys.append("customer")
             
-            # Get order info
+            # Order query
             if entities.get("order_id"):
                 order_query = """
                     SELECT o.*, c.name as customer_name, p.name as product_name 
@@ -350,16 +466,25 @@ User message: """ + user_message
                     LEFT JOIN products p ON o.product_id = p.product_id 
                     WHERE o.order_id = :order_id
                 """
-                order = await db.fetch_one(order_query, {"order_id": entities["order_id"]})
-                if order:
-                    context["order"] = dict(order)
+                tasks.append(db.fetch_one(order_query, {"order_id": entities["order_id"]}))
+                task_keys.append("order")
             
-            # Get product info
+            # Product query
             if entities.get("product_name"):
                 product_query = "SELECT * FROM products WHERE name ILIKE :product_name LIMIT 1"
-                product = await db.fetch_one(product_query, {"product_name": f"%{entities['product_name']}%"})
-                if product:
-                    context["product"] = dict(product)
+                tasks.append(db.fetch_one(product_query, {"product_name": f"%{entities['product_name']}%"}))
+                task_keys.append("product")
+            
+            # Execute all queries in parallel
+            if tasks:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # Build context from results
+                for i, result in enumerate(results):
+                    if result and not isinstance(result, Exception):
+                        context[task_keys[i]] = dict(result)
+                    elif isinstance(result, Exception):
+                        logger.warning(f"Query failed for {task_keys[i]}: {result}")
             
         except Exception as e:
             logger.error(f"Database context fetch failed: {e}")
@@ -414,7 +539,7 @@ async def generate_response(
 
 async def analyze_and_respond(user_message: str) -> Dict[str, Any]:
     """
-    Analyze user intent and generate contextual response.
+    Analyze user intent and generate contextual response in a single optimized call.
     
     Args:
         user_message: User's input message
@@ -423,24 +548,63 @@ async def analyze_and_respond(user_message: str) -> Dict[str, Any]:
         Complete response with intent analysis and context
     """
     try:
-        # Analyze intent
-        intent_result = await llm_service.analyze_intent(user_message)
+        start_time = time.time()
         
-        # Get context from database
+        # Extract entities using simple pattern matching (faster than LLM call)
+        entities = await llm_service._extract_entities_fast(user_message)
+        
+        # Get context from database in parallel with response generation prep
         context = {}
-        if intent_result["success"] and intent_result["entities"]:
-            context = await llm_service.get_context_from_database(intent_result["entities"])
+        if entities:
+            context = await llm_service.get_context_from_database(entities)
         
-        # Generate response with context
-        response_result = await llm_service.generate_response(user_message, context)
+        # Enhanced system prompt that includes intent classification in response
+        enhanced_prompt = f"""{llm_service.system_prompt}
+
+IMPORTANT: After your response, on a new line, add: [INTENT: <category>]
+Categories: order_inquiry, product_question, general_support, complaint, compliment, other"""
+        
+        # Build messages with enhanced prompt
+        messages = [{"role": "system", "content": enhanced_prompt}]
+        if context:
+            context_message = await llm_service._format_context(context)
+            if context_message:
+                messages.append({"role": "system", "content": context_message})
+        messages.append({"role": "user", "content": user_message})
+        
+        # Single LLM call for both response and intent
+        response_result = await llm_service.client.chat.completions.create(
+            model=llm_service.model,
+            messages=messages,
+            max_tokens=llm_service.max_tokens,
+            temperature=llm_service.temperature,
+            stream=True
+        )
+        
+        # Collect streaming response
+        full_response = ""
+        async for chunk in response_result:
+            if chunk.choices[0].delta.content is not None:
+                full_response += chunk.choices[0].delta.content
+        
+        # Extract intent from response
+        response_text = full_response
+        intent = "other"
+        if "[INTENT:" in full_response:
+            parts = full_response.split("[INTENT:")
+            response_text = parts[0].strip()
+            intent_part = parts[1].split("]")[0].strip().lower()
+            intent = intent_part if intent_part in ["order_inquiry", "product_question", "general_support", "complaint", "compliment", "other"] else "other"
+        
+        processing_time = time.time() - start_time
         
         return {
-            "response": response_result["response"],
-            "intent": intent_result.get("intent", "other"),
-            "entities": intent_result.get("entities", {}),
+            "response": response_text,
+            "intent": intent,
+            "entities": entities,
             "context": context,
-            "processing_time": response_result.get("processing_time", 0),
-            "success": response_result["success"]
+            "processing_time": processing_time,
+            "success": True
         }
         
     except Exception as e:

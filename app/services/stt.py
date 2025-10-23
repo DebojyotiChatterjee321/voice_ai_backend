@@ -11,7 +11,7 @@ from typing import Optional, Dict, Any, Union
 import tempfile
 import os
 
-import whisper
+from faster_whisper import WhisperModel
 import torch
 import numpy as np
 from pydub import AudioSegment
@@ -29,6 +29,7 @@ class WhisperSTTService:
         self.model = None
         self.model_name = settings.whisper_model
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.compute_type = "float16" if self.device == "cuda" else "int8"  # faster-whisper optimization
         self.is_initialized = False
         
         # Performance optimization settings
@@ -45,11 +46,17 @@ class WhisperSTTService:
             logger.info(f"Loading Whisper model '{self.model_name}' on {self.device}")
             start_time = time.time()
             
-            # Load model in a thread to avoid blocking
+            # Load faster-whisper model in a thread to avoid blocking
             loop = asyncio.get_event_loop()
             self.model = await loop.run_in_executor(
                 None, 
-                lambda: whisper.load_model(self.model_name, device=self.device)
+                lambda: WhisperModel(
+                    self.model_name, 
+                    device=self.device,
+                    compute_type=self.compute_type,
+                    cpu_threads=4,  # Optimize CPU usage
+                    num_workers=1   # Single worker for lower latency
+                )
             )
             
             load_time = time.time() - start_time
@@ -71,14 +78,16 @@ class WhisperSTTService:
             warmup_audio = np.zeros(self.sample_rate, dtype=np.float32)
             
             loop = asyncio.get_event_loop()
+            # faster-whisper returns segments and info
             await loop.run_in_executor(
                 None,
-                lambda: self.model.transcribe(
+                lambda: list(self.model.transcribe(
                     warmup_audio,
-                    fp16=False,
                     language="en",
-                    task="transcribe"
-                )
+                    task="transcribe",
+                    beam_size=1,  # Faster inference
+                    best_of=1
+                )[0])  # Get segments
             )
             logger.info("Whisper model warmed up successfully")
             
@@ -142,19 +151,38 @@ class WhisperSTTService:
             }
     
     def _transcribe_sync(self, audio: np.ndarray, language: Optional[str], task: str):
-        """Synchronous transcription method."""
-        return self.model.transcribe(
+        """Synchronous transcription method using faster-whisper."""
+        # faster-whisper returns (segments, info) tuple
+        segments, info = self.model.transcribe(
             audio,
             language=language,
             task=task,
-            fp16=False,  # Better compatibility
-            verbose=False,
-            condition_on_previous_text=False,  # Faster processing
+            beam_size=1,  # Faster inference (use 5 for better quality)
+            best_of=1,    # Faster inference
             temperature=0.0,  # Deterministic output
             compression_ratio_threshold=2.4,
-            logprob_threshold=-1.0,
-            no_speech_threshold=0.6
+            log_prob_threshold=-1.0,
+            no_speech_threshold=0.6,
+            condition_on_previous_text=False,  # Faster processing
+            vad_filter=True,  # Voice activity detection for speed
+            vad_parameters=dict(min_silence_duration_ms=500)
         )
+        
+        # Convert segments generator to list and build result dict
+        segments_list = list(segments)
+        return {
+            "text": " ".join([segment.text for segment in segments_list]),
+            "language": info.language,
+            "segments": [
+                {
+                    "text": segment.text,
+                    "start": segment.start,
+                    "end": segment.end,
+                    "avg_logprob": segment.avg_logprob
+                }
+                for segment in segments_list
+            ]
+        }
     
     async def _preprocess_audio(self, audio_data: Union[bytes, np.ndarray, str]) -> np.ndarray:
         """Preprocess audio data for optimal Whisper performance."""
