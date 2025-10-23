@@ -25,6 +25,14 @@ openai
 openai-whisper
 elevenlabs
 
+# Tier 2 Optimizations
+groq  # Ultra-fast LLM and STT
+# silero-vad loaded via torch.hub (no separate install needed)
+soundfile  # Audio file I/O for VAD
+
+# Tier 2.5 Optimizations
+websockets  # For Cartesia streaming TTS
+
 # Data Validation
 pydantic
 pydantic-settings

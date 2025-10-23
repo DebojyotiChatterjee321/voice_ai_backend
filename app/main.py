@@ -20,6 +20,7 @@ from app.websocket import websocket_router, api_router
 from app.pipecat import initialize_pipeline, voice_pipeline
 from app.services import initialize_all_services, health_check_all_services
 from app.api import voice_router
+from app.api.conversational_websocket import conversational_router, start_cleanup_task, stop_cleanup_task
 
 # Configure logging
 logging.basicConfig(
@@ -54,6 +55,11 @@ async def lifespan(app: FastAPI):
             logger.info("✅ Voice pipeline initialized successfully")
         else:
             logger.warning("⚠️ Voice pipeline initialization failed")
+        
+        # Start conversational session cleanup task
+        logger.info("🔄 Starting conversational session cleanup task...")
+        await start_cleanup_task()
+        logger.info("✅ Cleanup task started")
             
     except Exception as e:
         logger.error(f"❌ Startup failed: {e}")
@@ -64,6 +70,10 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("🔄 Shutting down Voice Assistant AI Backend...")
     try:
+        # Stop cleanup task
+        await stop_cleanup_task()
+        logger.info("✅ Cleanup task stopped")
+        
         await disconnect_database()
         logger.info("✅ Database disconnected successfully")
     except Exception as e:
@@ -97,6 +107,7 @@ app.mount("/static", StaticFiles(directory=static_dir), name="static")
 app.include_router(websocket_router)
 app.include_router(api_router)
 app.include_router(voice_router)
+app.include_router(conversational_router)  # New conversational AI router
 
 
 @app.get("/")
@@ -114,6 +125,7 @@ async def api_root():
         "version": settings.version,
         "docs_url": "/docs",
         "websocket_url": f"ws://localhost:{settings.port}/ws",
+        "conversational_websocket_url": f"ws://localhost:{settings.port}/conversational/ws",
         "frontend_url": f"http://localhost:{settings.port}/"
     }
 
@@ -171,8 +183,11 @@ async def app_info():
             "PostgreSQL with AsyncPG",
             "Pipecat AI Integration",
             "Real-time WebSocket Support",
+            "Conversational AI (VAD + Streaming)",
             "OpenAI Integration",
             "Whisper STT",
+            "Groq Ultra-fast Processing",
+            "Cartesia Streaming TTS",
             "E-commerce Customer Support"
         ],
         "endpoints": {

@@ -153,7 +153,10 @@ class VoiceAssistantProcessor(FrameProcessor):
             total_time = time.time() - start_time
             self._update_stats(total_time)
             
-            logger.info(f"Total pipeline latency: {total_time:.3f}s (STT: {stt_time:.3f}s, LLM: {llm_time:.3f}s, TTS: {tts_time:.3f}s)")
+            # Log performance with optimization markers
+            cached_marker = " [CACHED]" if response_result.get("cached", False) else ""
+            logger.info(f"✅ OPTIMIZED Pipeline latency: {total_time:.3f}s (STT: {stt_time:.3f}s, LLM: {llm_time:.3f}s{cached_marker}, TTS: {tts_time:.3f}s)")
+            logger.info(f"📊 Performance: {total_time*1000:.0f}ms total (Target: <2000ms)")
             
             # Store output frames for retrieval
             self.output_frames.append(audio_frame)
