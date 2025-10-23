@@ -36,7 +36,7 @@ class CartesiaTTSService:
         self.sample_rate = 44100  # Cartesia default
         self.output_format = {
             "container": "raw",
-            "encoding": "pcm_f32le",
+            "encoding": "pcm_s16le",  # 16-bit PCM for WebSocket streaming
             "sample_rate": self.sample_rate
         }
     
@@ -172,9 +172,11 @@ class CartesiaTTSService:
             await self.initialize()
         
         try:
-            async with websockets.connect(
-                f"{self.ws_url}?api_key={self.api_key}&cartesia_version=2024-06-10"
-            ) as websocket:
+            ws_url = f"{self.ws_url}?api_key={self.api_key}&cartesia_version=2024-06-10"
+            logger.info(f"Cartesia: Connecting to WebSocket...")
+            
+            async with websockets.connect(ws_url) as websocket:
+                logger.info(f"Cartesia: WebSocket connected")
                 
                 # Send synthesis request
                 request = {
@@ -188,32 +190,53 @@ class CartesiaTTSService:
                     "context_id": f"ctx_{int(time.time() * 1000)}"
                 }
                 
+                logger.info(f"Cartesia: Sending request: {json.dumps(request, indent=2)}")
                 await websocket.send(json.dumps(request))
+                logger.info(f"Cartesia: Request sent, waiting for response...")
                 
                 # Receive audio chunks
                 first_chunk = True
                 start_time = time.time()
+                chunk_count = 0
                 
-                async for message in websocket:
-                    data = json.loads(message)
-                    
-                    if data.get("done"):
-                        break
-                    
-                    if "audio" in data:
-                        # Decode base64 audio
-                        audio_chunk = base64.b64decode(data["audio"])
-                        
-                        if first_chunk:
-                            ttfb = time.time() - start_time
-                            logger.info(f"🚀 Cartesia streaming TTFB: {ttfb*1000:.0f}ms")
-                            first_chunk = False
-                        
-                        yield audio_chunk
-                    
-                    if "error" in data:
-                        logger.error(f"Cartesia streaming error: {data['error']}")
-                        break
+                logger.debug(f"Cartesia: Waiting for audio chunks...")
+                
+                try:
+                    async for message in websocket:
+                        try:
+                            data = json.loads(message)
+                            logger.debug(f"Cartesia message: {list(data.keys())}")
+                            
+                            if data.get("done"):
+                                logger.info(f"Cartesia: Stream complete, received {chunk_count} chunks")
+                                break
+                            
+                            if "audio" in data:
+                                # Decode base64 audio
+                                audio_chunk = base64.b64decode(data["audio"])
+                                logger.debug(f"Cartesia: Audio chunk {chunk_count}, size: {len(audio_chunk)} bytes")
+                                
+                                if first_chunk:
+                                    ttfb = time.time() - start_time
+                                    logger.info(f"🚀 Cartesia streaming TTFB: {ttfb*1000:.0f}ms")
+                                    first_chunk = False
+                                
+                                chunk_count += 1
+                                yield audio_chunk
+                            
+                            if "error" in data:
+                                logger.error(f"Cartesia streaming error: {data['error']}")
+                                break
+                        except json.JSONDecodeError as e:
+                            logger.error(f"Cartesia: Failed to parse message: {e}")
+                            logger.error(f"Cartesia: Raw message: {message[:200]}")
+                            continue
+                except Exception as e:
+                    logger.error(f"Cartesia: WebSocket loop error: {e}")
+                
+                if chunk_count == 0:
+                    logger.warning(f"Cartesia: No audio chunks received!")
+                    logger.warning(f"Cartesia: WebSocket state: {websocket.state if hasattr(websocket, 'state') else 'unknown'}")
                         
         except Exception as e:
             logger.error(f"Cartesia streaming synthesis failed: {e}")

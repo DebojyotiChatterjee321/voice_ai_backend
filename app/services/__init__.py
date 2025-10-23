@@ -39,6 +39,25 @@ from .vad import (
     initialize_vad
 )
 
+# Import conversational AI services
+from .realtime_vad import (
+    RealtimeVADProcessor,
+    create_realtime_vad,
+    SpeechState
+)
+
+from .streaming_tts_manager import (
+    StreamingTTSManager,
+    streaming_tts_manager
+)
+
+from .conversational_handler import (
+    ConversationalSession,
+    SessionManager,
+    session_manager,
+    ConversationState
+)
+
 # Expose both legacy and new services
 stt_service = service_selector  # Use service selector by default
 llm_service = service_selector  # Use service selector by default
@@ -69,7 +88,18 @@ __all__ = [
     "service_selector",
     "vad_service",
     "initialize_services",
-    "initialize_vad"
+    "initialize_vad",
+    
+    # Conversational AI Services
+    "RealtimeVADProcessor",
+    "create_realtime_vad",
+    "SpeechState",
+    "StreamingTTSManager",
+    "streaming_tts_manager",
+    "ConversationalSession",
+    "SessionManager",
+    "session_manager",
+    "ConversationState"
 ]
 
 

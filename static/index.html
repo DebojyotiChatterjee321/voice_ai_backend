@@ -28,8 +28,8 @@
     <div class="container mx-auto px-4 py-8 max-w-4xl">
         <!-- Header -->
         <div class="text-center mb-8">
-            <h1 class="text-4xl font-bold text-gray-800 mb-2">🎤 Voice Assistant AI</h1>
-            <p class="text-gray-600">Click record, speak, and get AI-powered responses with voice synthesis</p>
+            <h1 class="text-4xl font-bold text-gray-800 mb-2">🎙️ Conversational AI Assistant</h1>
+            <p class="text-gray-600">Start a call and talk naturally - like a phone conversation!</p>
         </div>
 
         <!-- Connection Status -->
@@ -45,19 +45,35 @@
             </div>
         </div>
 
-        <!-- Voice Controls -->
+        <!-- Call Controls -->
         <div class="bg-white rounded-lg shadow-md p-6 mb-6">
             <div class="text-center">
                 <button 
-                    id="record-btn" 
-                    class="bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white font-bold py-4 px-8 rounded-full text-lg transition-all duration-200 mb-4"
+                    id="call-btn" 
+                    class="bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white font-bold py-4 px-8 rounded-full text-lg transition-all duration-200 mb-4"
                     disabled
                 >
-                    🎤 Start Recording
+                    📞 Start Call
                 </button>
                 
-                <div id="recording-status" class="text-sm text-gray-600 mb-4 h-6">
-                    Connect to start recording
+                <div id="call-status" class="text-sm text-gray-600 mb-4 h-6">
+                    Connecting...
+                </div>
+                
+                <!-- Conversation State Indicator -->
+                <div id="conversation-state" class="flex justify-center items-center space-x-2 mb-4 h-8">
+                    <div id="state-listening" class="hidden items-center space-x-2 text-blue-600">
+                        <div class="w-3 h-3 bg-blue-500 rounded-full pulsing"></div>
+                        <span class="font-medium">🎧 Listening...</span>
+                    </div>
+                    <div id="state-processing" class="hidden items-center space-x-2 text-yellow-600">
+                        <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-600"></div>
+                        <span class="font-medium">⚡ Processing...</span>
+                    </div>
+                    <div id="state-speaking" class="hidden items-center space-x-2 text-green-600">
+                        <div class="w-3 h-3 bg-green-500 rounded-full pulsing"></div>
+                        <span class="font-medium">🗣️ Speaking...</span>
+                    </div>
                 </div>
                 
                 <!-- Audio Level Indicator -->
@@ -65,23 +81,11 @@
                     <div id="audio-level" class="bg-green-500 h-2 rounded-full transition-all duration-100" style="width: 0%"></div>
                 </div>
                 
-                <!-- Text Input Alternative -->
-                <div class="mt-4 pt-4 border-t border-gray-200">
-                    <div class="flex space-x-2">
-                        <input 
-                            id="text-input" 
-                            type="text" 
-                            placeholder="Or type your message here..."
-                            class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            disabled
-                        >
-                        <button 
-                            id="send-text-btn"
-                            class="bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white px-6 py-2 rounded-lg transition-colors"
-                            disabled
-                        >
-                            Send
-                        </button>
+                <!-- Live Transcription Display -->
+                <div id="live-transcription-container" class="mt-4 pt-4 border-t border-gray-200 hidden">
+                    <div class="text-sm text-gray-500 mb-2">Live Transcription:</div>
+                    <div id="live-transcription" class="bg-gray-50 rounded-lg p-3 min-h-[60px] text-gray-700 italic">
+                        <span class="text-gray-400">Your speech will appear here...</span>
                     </div>
                 </div>
             </div>
@@ -140,26 +144,25 @@
                     connectionIndicator: document.getElementById('connection-indicator'),
                     connectionStatus: document.getElementById('connection-status'),
                     sessionIdDisplay: document.getElementById('session-id'),
-                    recordBtn: document.getElementById('record-btn'),
-                    recordingStatus: document.getElementById('recording-status'),
+                    recordBtn: document.getElementById('call-btn'),
+                    recordingStatus: document.getElementById('call-status'),
                     audioLevel: document.getElementById('audio-level'),
-                    textInput: document.getElementById('text-input'),
-                    sendTextBtn: document.getElementById('send-text-btn'),
                     processingStatus: document.getElementById('processing-status'),
                     processingDetails: document.getElementById('processing-details'),
                     conversation: document.getElementById('conversation'),
                     responseAudio: document.getElementById('response-audio'),
                     debugPanel: document.getElementById('debug-panel'),
-                    debugContent: document.getElementById('debug-content')
+                    debugContent: document.getElementById('debug-content'),
+                    liveTranscriptionContainer: document.getElementById('live-transcription-container'),
+                    liveTranscription: document.getElementById('live-transcription'),
+                    stateListening: document.getElementById('state-listening'),
+                    stateProcessing: document.getElementById('state-processing'),
+                    stateSpeaking: document.getElementById('state-speaking')
                 };
             }
             
             setupEventListeners() {
                 this.elements.recordBtn.addEventListener('click', () => this.toggleRecording());
-                this.elements.sendTextBtn.addEventListener('click', () => this.sendTextMessage());
-                this.elements.textInput.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') this.sendTextMessage();
-                });
                 
                 // Debug panel toggle (double-click header)
                 document.querySelector('h1').addEventListener('dblclick', () => {
@@ -198,16 +201,12 @@
                     this.elements.connectionIndicator.className = 'w-3 h-3 bg-green-500 rounded-full';
                     this.elements.connectionStatus.textContent = 'Connected';
                     this.elements.recordBtn.disabled = false;
-                    this.elements.textInput.disabled = false;
-                    this.elements.sendTextBtn.disabled = false;
-                    this.elements.recordingStatus.textContent = 'Ready to record';
+                    this.elements.recordingStatus.textContent = 'Ready to start call';
                 } else {
                     this.elements.connectionIndicator.className = 'w-3 h-3 bg-red-500 rounded-full';
                     this.elements.connectionStatus.textContent = 'Disconnected';
                     this.elements.recordBtn.disabled = true;
-                    this.elements.textInput.disabled = true;
-                    this.elements.sendTextBtn.disabled = true;
-                    this.elements.recordingStatus.textContent = 'Connect to start recording';
+                    this.elements.recordingStatus.textContent = 'Connecting...';
                     this.sessionId = null;
                     this.elements.sessionIdDisplay.textContent = 'Not connected';
                 }
@@ -263,10 +262,10 @@
                     this.mediaRecorder.start();
                     this.isRecording = true;
                     
-                    this.elements.recordBtn.textContent = '⏹️ Stop Recording';
+                    this.elements.recordBtn.textContent = '📞 End Call';
                     this.elements.recordBtn.classList.add('recording', 'bg-red-500', 'hover:bg-red-600');
-                    this.elements.recordBtn.classList.remove('bg-blue-500', 'hover:bg-blue-600');
-                    this.elements.recordingStatus.textContent = 'Recording... Click to stop';
+                    this.elements.recordBtn.classList.remove('bg-green-500', 'hover:bg-green-600');
+                    this.elements.recordingStatus.textContent = 'Call in progress... Click to end';
                     
                 } catch (error) {
                     this.log('Error starting recording:', error);
@@ -284,10 +283,10 @@
                         this.audioContext.close();
                     }
                     
-                    this.elements.recordBtn.textContent = '🎤 Start Recording';
+                    this.elements.recordBtn.textContent = '📞 Start Call';
                     this.elements.recordBtn.classList.remove('recording', 'bg-red-500', 'hover:bg-red-600');
-                    this.elements.recordBtn.classList.add('bg-blue-500', 'hover:bg-blue-600');
-                    this.elements.recordingStatus.textContent = 'Processing recording...';
+                    this.elements.recordBtn.classList.add('bg-green-500', 'hover:bg-green-600');
+                    this.elements.recordingStatus.textContent = 'Processing...';
                     this.elements.audioLevel.style.width = '0%';
                 }
             }
@@ -318,7 +317,7 @@
                     const base64Audio = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
                     
                     this.sendVoiceData(base64Audio);
-                    this.elements.recordingStatus.textContent = 'Ready to record';
+                    this.elements.recordingStatus.textContent = 'Ready to start call';
                     
                     // Clear audio chunks after processing
                     this.audioChunks = [];
@@ -346,28 +345,29 @@
                 this.showProcessingStatus('Processing voice input...');
             }
             
-            sendTextMessage() {
-                const text = this.elements.textInput.value.trim();
-                if (!text) return;
-                
-                if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-                    alert('Not connected to server');
-                    return;
-                }
-                
-                const message = {
-                    type: 'text_message',
-                    text: text,
-                    session_id: this.sessionId
-                };
-                
-                this.ws.send(JSON.stringify(message));
-                this.elements.textInput.value = '';
-                this.showProcessingStatus('Processing text message...');
-                
-                // Add user message to conversation immediately
-                this.addToConversation('user', text);
-            }
+            // Text message functionality removed - no text input in this interface
+            // sendTextMessage() {
+            //     const text = this.elements.textInput.value.trim();
+            //     if (!text) return;
+            //     
+            //     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            //         alert('Not connected to server');
+            //         return;
+            //     }
+            //     
+            //     const message = {
+            //         type: 'text_message',
+            //         text: text,
+            //         session_id: this.sessionId
+            //     };
+            //     
+            //     this.ws.send(JSON.stringify(message));
+            //     this.elements.textInput.value = '';
+            //     this.showProcessingStatus('Processing text message...');
+            //     
+            //     // Add user message to conversation immediately
+            //     this.addToConversation('user', text);
+            // }
             
             handleMessage(data) {
                 this.log('Received:', data);

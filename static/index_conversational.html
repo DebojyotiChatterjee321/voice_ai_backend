@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conversational AI Assistant</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .pulsing {
+            animation: pulse 1.5s ease-in-out infinite alternate;
+        }
+        
+        @keyframes pulse {
+            from { transform: scale(1); opacity: 1; }
+            to { transform: scale(1.1); opacity: 0.8; }
+        }
+        
+        .conversation-item {
+            transition: all 0.3s ease;
+        }
+        
+        .conversation-item:hover {
+            transform: translateX(4px);
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.3s ease-in;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-4xl">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-gray-800 mb-2">🎙️ Conversational AI Assistant</h1>
+            <p class="text-gray-600">Start a call and talk naturally - like a phone conversation!</p>
+        </div>
+
+        <!-- Connection Status -->
+        <div class="bg-white rounded-lg shadow-md p-4 mb-6">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-2">
+                    <div id="connection-indicator" class="w-3 h-3 bg-red-500 rounded-full"></div>
+                    <span id="connection-status" class="text-sm font-medium">Connecting...</span>
+                </div>
+                <div class="text-sm text-gray-500">
+                    Session: <span id="session-id" class="font-mono">Not started</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Call Controls -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <div class="text-center">
+                <button 
+                    id="call-btn" 
+                    class="bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white font-bold py-4 px-8 rounded-full text-lg transition-all duration-200 mb-4"
+                    disabled
+                >
+                    📞 Start Call
+                </button>
+                
+                <div id="call-status" class="text-sm text-gray-600 mb-4 h-6">
+                    Ready to connect
+                </div>
+                
+                <!-- Conversation State Indicator -->
+                <div id="conversation-state" class="flex justify-center items-center space-x-2 mb-4 h-8">
+                    <div id="state-listening" class="hidden items-center space-x-2 text-blue-600">
+                        <div class="w-3 h-3 bg-blue-500 rounded-full pulsing"></div>
+                        <span class="font-medium">🎧 Listening...</span>
+                    </div>
+                    <div id="state-processing" class="hidden items-center space-x-2 text-yellow-600">
+                        <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-600"></div>
+                        <span class="font-medium">⚡ Processing...</span>
+                    </div>
+                    <div id="state-speaking" class="hidden items-center space-x-2 text-green-600">
+                        <div class="w-3 h-3 bg-green-500 rounded-full pulsing"></div>
+                        <span class="font-medium">🗣️ Speaking...</span>
+                    </div>
+                </div>
+                
+                <!-- Audio Level Indicator -->
+                <div class="w-full bg-gray-200 rounded-full h-2 mb-4">
+                    <div id="audio-level" class="bg-green-500 h-2 rounded-full transition-all duration-100" style="width: 0%"></div>
+                </div>
+                
+                <!-- Live Transcription Display -->
+                <div id="live-transcription-container" class="mt-4 pt-4 border-t border-gray-200 hidden">
+                    <div class="text-sm text-gray-500 mb-2">Live Transcription:</div>
+                    <div id="live-transcription" class="bg-gray-50 rounded-lg p-3 min-h-[60px] text-gray-700 italic">
+                        <span class="text-gray-400">Your speech will appear here...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Conversation History -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">💬 Conversation</h2>
+            <div id="conversation" class="space-y-4 max-h-96 overflow-y-auto">
+                <div class="text-gray-500 text-center py-8">
+                    Start a call to begin your conversation
+                </div>
+            </div>
+        </div>
+
+        <!-- Performance Metrics -->
+        <div id="metrics-panel" class="bg-white rounded-lg shadow-md p-4 mb-6 hidden">
+            <h3 class="font-semibold text-gray-700 mb-2">Performance Metrics</h3>
+            <div class="grid grid-cols-4 gap-4 text-sm">
+                <div class="text-center">
+                    <div class="text-gray-500">Turns</div>
+                    <div id="metric-turns" class="text-lg font-bold text-gray-800">0</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-gray-500">Avg Latency</div>
+                    <div id="metric-latency" class="text-lg font-bold text-gray-800">-</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-gray-500">Last STT</div>
+                    <div id="metric-stt" class="text-sm font-medium text-blue-600">-</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-gray-500">Last TTS</div>
+                    <div id="metric-tts" class="text-sm font-medium text-green-600">-</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Debug Info (Hidden by default) -->
+        <div id="debug-panel" class="bg-gray-50 rounded-lg p-4 mt-6 hidden">
+            <h3 class="font-semibold text-gray-700 mb-2">Debug Information</h3>
+            <pre id="debug-content" class="text-xs text-gray-600 overflow-auto max-h-32"></pre>
+        </div>
+    </div>
+
+    <!-- Audio playback element -->
+    <audio id="response-audio" class="hidden"></audio>
+
+    <script>
+        class ConversationalAI {
+            constructor() {
+                this.ws = null;
+                this.sessionId = null;
+                this.isInCall = false;
+                this.isConnected = false;
+                
+                // Audio streaming
+                this.audioWorklet = null;
+                this.audioChunks = [];
+                this.audioProcessor = null;
+                this.audioContext = null;
+                this.analyser = null;
+                this.microphone = null;
+                
+                // Audio playback
+                this.audioQueue = [];
+                this.isPlaying = false;
+                this.audioContextPlayback = null;
+                this.currentSource = null;
+                
+                // State tracking
+                this.currentState = 'idle';  // idle, listening, processing, speaking
+                this.turnCount = 0;
+                this.metrics = {
+                    totalLatency: 0,
+                    lastSTT: 0,
+                    lastLLM: 0,
+                    lastTTS: 0
+                };
+                
+                this.initializeElements();
+                this.setupEventListeners();
+                this.connect();
+            }
+            
+            initializeElements() {
+                this.elements = {
+                    connectionIndicator: document.getElementById('connection-indicator'),
+                    connectionStatus: document.getElementById('connection-status'),
+                    sessionIdDisplay: document.getElementById('session-id'),
+                    callBtn: document.getElementById('call-btn'),
+                    callStatus: document.getElementById('call-status'),
+                    audioLevel: document.getElementById('audio-level'),
+                    conversation: document.getElementById('conversation'),
+                    liveTranscription: document.getElementById('live-transcription'),
+                    liveTranscriptionContainer: document.getElementById('live-transcription-container'),
+                    stateListening: document.getElementById('state-listening'),
+                    stateProcessing: document.getElementById('state-processing'),
+                    stateSpeaking: document.getElementById('state-speaking'),
+                    metricsPanel: document.getElementById('metrics-panel'),
+                    metricTurns: document.getElementById('metric-turns'),
+                    metricLatency: document.getElementById('metric-latency'),
+                    metricSTT: document.getElementById('metric-stt'),
+                    metricTTS: document.getElementById('metric-tts'),
+                    debugPanel: document.getElementById('debug-panel'),
+                    debugContent: document.getElementById('debug-content'),
+                    responseAudio: document.getElementById('response-audio')
+                };
+            }
+            
+            setupEventListeners() {
+                this.elements.callBtn.addEventListener('click', () => this.toggleCall());
+                
+                // Debug panel toggle (double-click header)
+                document.querySelector('h1').addEventListener('dblclick', () => {
+                    this.elements.debugPanel.classList.toggle('hidden');
+                    this.elements.metricsPanel.classList.toggle('hidden');
+                });
+            }
+            
+            connect() {
+                this.log('Connecting to conversational AI...');
+                const wsUrl = `ws://localhost:8000/conversational/ws`;
+                this.ws = new WebSocket(wsUrl);
+                
+                this.ws.onopen = () => {
+                    this.isConnected = true;
+                    this.updateConnectionStatus(true);
+                    this.log('Connected to conversational AI');
+                };
+                
+                this.ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    this.handleMessage(data);
+                };
+                
+                this.ws.onclose = () => {
+                    this.isConnected = false;
+                    this.updateConnectionStatus(false);
+                    this.log('Disconnected from server');
+                    
+                    // Stop call if active
+                    if (this.isInCall) {
+                        this.stopCall();
+                    }
+                    
+                    // Attempt reconnection after 3 seconds
+                    setTimeout(() => this.connect(), 3000);
+                };
+                
+                this.ws.onerror = (error) => {
+                    this.log('WebSocket error:', error);
+                };
+            }
+            
+            updateConnectionStatus(connected) {
+                if (connected) {
+                    this.elements.connectionIndicator.className = 'w-3 h-3 bg-green-500 rounded-full';
+                    this.elements.connectionStatus.textContent = 'Connected';
+                    this.elements.callBtn.disabled = false;
+                    this.elements.callStatus.textContent = 'Ready to start call';
+                } else {
+                    this.elements.connectionIndicator.className = 'w-3 h-3 bg-red-500 rounded-full';
+                    this.elements.connectionStatus.textContent = 'Disconnected';
+                    this.elements.callBtn.disabled = true;
+                    this.elements.callStatus.textContent = 'Connecting...';
+                }
+            }
+            
+            async toggleCall() {
+                if (this.isInCall) {
+                    await this.stopCall();
+                } else {
+                    await this.startCall();
+                }
+            }
+            
+            async startCall() {
+                try {
+                    this.log('Starting call...');
+                    
+                    // Request microphone access
+                    this.audioStream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            sampleRate: 16000,
+                            channelCount: 1,
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true
+                        }
+                    });
+                    
+                    // Setup audio monitoring and processing
+                    await this.setupAudioMonitoring(this.audioStream);
+                    await this.setupAudioProcessor(this.audioStream);
+                    
+                    // Send start_call message to server
+                    this.ws.send(JSON.stringify({
+                        type: 'start_call',
+                        config: {
+                            vad_threshold: 0.5,
+                            silence_duration_ms: 300,
+                            min_speech_duration_ms: 200,
+                            language: 'en'
+                        }
+                    }));
+                    
+                    this.isInCall = true;
+                    this.elements.callBtn.textContent = '📴 End Call';
+                    this.elements.callBtn.classList.remove('bg-green-500', 'hover:bg-green-600');
+                    this.elements.callBtn.classList.add('bg-red-500', 'hover:bg-red-600');
+                    this.elements.callStatus.textContent = 'Call in progress';
+                    this.elements.liveTranscriptionContainer.classList.remove('hidden');
+                    
+                    this.log('Call started successfully');
+                    
+                } catch (error) {
+                    this.log('Error starting call:', error);
+                    alert('Could not access microphone. Please check permissions.');
+                }
+            }
+            
+            async stopCall() {
+                this.log('Stopping call...');
+                
+                // Disconnect audio processor
+                if (this.audioProcessor) {
+                    this.audioProcessor.disconnect();
+                    this.audioProcessor = null;
+                }
+                
+                // Stop audio stream
+                if (this.audioStream) {
+                    this.audioStream.getTracks().forEach(track => track.stop());
+                }
+                
+                // Close audio context
+                if (this.audioContext) {
+                    await this.audioContext.close();
+                    this.audioContext = null;
+                }
+                
+                // Send end_call message
+                if (this.isConnected) {
+                    this.ws.send(JSON.stringify({
+                        type: 'end_call'
+                    }));
+                }
+                
+                this.isInCall = false;
+                this.sessionId = null;
+                this.setState('idle');
+                
+                this.elements.callBtn.textContent = '📞 Start Call';
+                this.elements.callBtn.classList.remove('bg-red-500', 'hover:bg-red-600');
+                this.elements.callBtn.classList.add('bg-green-500', 'hover:bg-green-600');
+                this.elements.callStatus.textContent = 'Ready to start call';
+                this.elements.sessionIdDisplay.textContent = 'Not started';
+                this.elements.audioLevel.style.width = '0%';
+                this.elements.liveTranscriptionContainer.classList.add('hidden');
+                
+                this.log('Call ended');
+            }
+            
+            async setupAudioMonitoring(stream) {
+                this.audioContext = new AudioContext({ sampleRate: 16000 });
+                this.analyser = this.audioContext.createAnalyser();
+                this.microphone = this.audioContext.createMediaStreamSource(stream);
+                this.microphone.connect(this.analyser);
+                this.analyser.fftSize = 256;
+                
+                const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+                
+                const monitor = () => {
+                    if (!this.isInCall) return;
+                    
+                    this.analyser.getByteFrequencyData(dataArray);
+                    const average = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
+                    const percentage = Math.min((average / 128) * 100, 100);
+                    
+                    this.elements.audioLevel.style.width = `${percentage}%`;
+                    
+                    requestAnimationFrame(monitor);
+                };
+                
+                monitor();
+            }
+            
+            async setupAudioProcessor(stream) {
+                // Create ScriptProcessorNode to capture raw PCM audio
+                const bufferSize = 4096;
+                this.audioProcessor = this.audioContext.createScriptProcessor(bufferSize, 1, 1);
+                
+                let audioBuffer = [];
+                let lastSendTime = Date.now();
+                const sendInterval = 200; // Send every 200ms
+                
+                this.audioProcessor.onaudioprocess = (event) => {
+                    if (!this.isInCall) return;
+                    
+                    const inputData = event.inputBuffer.getChannelData(0);
+                    
+                    // Convert float32 to int16
+                    const int16Data = new Int16Array(inputData.length);
+                    for (let i = 0; i < inputData.length; i++) {
+                        const s = Math.max(-1, Math.min(1, inputData[i]));
+                        int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                    }
+                    
+                    // Add to buffer
+                    audioBuffer.push(int16Data);
+                    
+                    // Send chunks every 200ms
+                    const now = Date.now();
+                    if (now - lastSendTime >= sendInterval) {
+                        if (audioBuffer.length > 0) {
+                            // Concatenate all buffered chunks
+                            const totalLength = audioBuffer.reduce((sum, arr) => sum + arr.length, 0);
+                            const combined = new Int16Array(totalLength);
+                            let offset = 0;
+                            for (const chunk of audioBuffer) {
+                                combined.set(chunk, offset);
+                                offset += chunk.length;
+                            }
+                            
+                            // Send the combined audio
+                            this.sendPCMAudio(combined);
+                            
+                            // Clear buffer
+                            audioBuffer = [];
+                            lastSendTime = now;
+                        }
+                    }
+                };
+                
+                // Connect processor
+                this.microphone.connect(this.audioProcessor);
+                this.audioProcessor.connect(this.audioContext.destination);
+            }
+            
+            sendPCMAudio(int16Array) {
+                try {
+                    if (!this.isConnected || !this.isInCall) return;
+                    
+                    // Convert Int16Array to bytes
+                    const bytes = new Uint8Array(int16Array.buffer);
+                    
+                    // Convert to base64
+                    let binary = '';
+                    for (let i = 0; i < bytes.byteLength; i++) {
+                        binary += String.fromCharCode(bytes[i]);
+                    }
+                    const base64Audio = btoa(binary);
+                    
+                    console.log('📤 Sending audio chunk:', {
+                        samples: int16Array.length,
+                        bytes: bytes.byteLength,
+                        base64Length: base64Audio.length
+                    });
+                    
+                    // Send to server
+                    this.ws.send(JSON.stringify({
+                        type: 'audio_chunk',
+                        data: base64Audio,
+                        timestamp: Date.now()
+                    }));
+                } catch (error) {
+                    console.error('❌ Error sending PCM audio:', error);
+                }
+            }
+            
+            handleMessage(data) {
+                console.log('📩 Received message:', data.type, data);
+                
+                switch (data.type) {
+                    case 'connection_established':
+                        console.log('✅ Connection established');
+                        break;
+                    
+                    case 'call_started':
+                        console.log('📞 Call started, session:', data.session_id);
+                        this.sessionId = data.session_id;
+                        this.elements.sessionIdDisplay.textContent = data.session_id.substring(0, 8) + '...';
+                        if (data.message) {
+                            console.log('🤖 Greeting:', data.message);
+                        }
+                        break;
+                    
+                    case 'speech_detected':
+                        console.log('🎤 Speech detected!');
+                        break;
+                    
+                    case 'transcription':
+                        console.log('📝 Transcription:', data.text, 'Final:', data.is_final);
+                        if (data.is_final) {
+                            this.elements.liveTranscription.innerHTML = `<span class="text-gray-700">"${this.escapeHtml(data.text)}"</span>`;
+                            // Add user message to conversation
+                            this.addMessageToConversation('user', data.text);
+                        }
+                        break;
+                    
+                    case 'bot_response':
+                        console.log('🤖 Bot response:', data.text);
+                        console.log('💬 ASSISTANT SAYS:', data.text);
+                        // Add bot message to conversation
+                        this.addMessageToConversation('assistant', data.text);
+                        break;
+                    
+                    case 'audio_chunk':
+                        console.log('🔊 Audio chunk received, size:', data.data?.length || 0);
+                        this.handleAudioChunk(data);
+                        break;
+                    
+                    case 'bot_speaking_end':
+                        console.log('✅ Bot finished speaking');
+                        break;
+                    
+                    case 'listening':
+                        console.log('👂 Now listening...');
+                        this.setState('listening');
+                        this.elements.liveTranscription.innerHTML = '<span class="text-gray-400">Your speech will appear here...</span>';
+                        break;
+                    
+                    case 'processing_stt':
+                        console.log('⚙️ Processing STT...');
+                        this.setState('processing');
+                        break;
+                    
+                    case 'processing_llm':
+                        console.log('⚙️ Processing LLM...');
+                        this.setState('processing');
+                        break;
+                    
+                    case 'turn_complete':
+                        console.log('✅ Turn complete:', {
+                            transcription: data.transcription,
+                            response: data.response,
+                            latency_ms: data.latency_ms,
+                            breakdown: data.breakdown
+                        });
+                        this.updateMetrics(data);
+                        break;
+                    
+                    case 'bot_interrupted':
+                        console.log('🛑 Bot interrupted by user');
+                        this.stopAudioPlayback();
+                        this.setState('listening');
+                        break;
+                    
+                    case 'call_ended':
+                        console.log('📴 Call ended by server');
+                        break;
+                    
+                    case 'error':
+                        console.error('❌ Error:', data.error);
+                        alert(`Error: ${data.error}`);
+                        break;
+                    
+                    default:
+                        console.warn('⚠️ Unknown message type:', data.type, data);
+                }
+            }
+            
+            async handleAudioChunk(data) {
+                try {
+                    console.log('🔊 Processing audio chunk for playback...');
+                    this.setState('speaking');
+                    
+                    // Decode base64 audio
+                    const audioData = atob(data.data);
+                    const audioArray = new Uint8Array(audioData.length);
+                    for (let i = 0; i < audioData.length; i++) {
+                        audioArray[i] = audioData.charCodeAt(i);
+                    }
+                    
+                    console.log('🔊 Audio chunk decoded:', audioArray.length, 'bytes');
+                    
+                    // Queue for playback
+                    this.audioQueue.push(audioArray);
+                    console.log('🔊 Audio queue size:', this.audioQueue.length);
+                    
+                    // Start playback if not already playing
+                    if (!this.isPlaying) {
+                        console.log('🔊 Starting audio playback...');
+                        await this.playAudioQueue();
+                    }
+                    
+                } catch (error) {
+                    console.error('❌ Error handling audio chunk:', error);
+                }
+            }
+            
+            async playAudioQueue() {
+                if (this.audioQueue.length === 0) {
+                    console.log('🔊 Audio queue empty, stopping playback');
+                    this.isPlaying = false;
+                    return;
+                }
+                
+                this.isPlaying = true;
+                console.log('🔊 Playing audio queue, chunks:', this.audioQueue.length);
+                
+                try {
+                    // Create or reuse audio context for playback
+                    if (!this.audioContextPlayback) {
+                        this.audioContextPlayback = new (window.AudioContext || window.webkitAudioContext)();
+                        console.log('🔊 Created audio context for playback');
+                    }
+                    
+                    while (this.audioQueue.length > 0) {
+                        const audioChunk = this.audioQueue.shift();
+                        console.log('🔊 Playing chunk:', audioChunk.length, 'bytes');
+                        
+                        // Convert to blob and play
+                        const blob = new Blob([audioChunk], { type: 'audio/mpeg' });
+                        const audioUrl = URL.createObjectURL(blob);
+                        
+                        await new Promise((resolve, reject) => {
+                            this.elements.responseAudio.src = audioUrl;
+                            this.elements.responseAudio.onended = () => {
+                                console.log('🔊 Chunk finished playing');
+                                URL.revokeObjectURL(audioUrl);
+                                resolve();
+                            };
+                            this.elements.responseAudio.onerror = (e) => {
+                                console.error('❌ Audio playback error:', e);
+                                URL.revokeObjectURL(audioUrl);
+                                reject(e);
+                            };
+                            
+                            this.elements.responseAudio.play()
+                                .then(() => console.log('🔊 Audio play started'))
+                                .catch(e => {
+                                    console.error('❌ Failed to play audio:', e);
+                                    reject(e);
+                                });
+                        });
+                    }
+                    
+                    console.log('🔊 All chunks played successfully');
+                    
+                } catch (error) {
+                    console.error('❌ Error playing audio queue:', error);
+                }
+                
+                this.isPlaying = false;
+            }
+            
+            stopAudioPlayback() {
+                console.log('🛑 Stopping audio playback...');
+                
+                // Clear audio queue
+                this.audioQueue = [];
+                
+                // Stop current audio
+                if (this.elements.responseAudio) {
+                    this.elements.responseAudio.pause();
+                    this.elements.responseAudio.currentTime = 0;
+                    this.elements.responseAudio.src = '';
+                }
+                
+                // Reset playback state
+                this.isPlaying = false;
+                
+                console.log('✅ Audio playback stopped');
+            }
+            
+            setState(state) {
+                this.currentState = state;
+                
+                // Hide all state indicators
+                this.elements.stateListening.classList.add('hidden');
+                this.elements.stateProcessing.classList.add('hidden');
+                this.elements.stateSpeaking.classList.add('hidden');
+                
+                // Show appropriate state
+                if (state === 'listening') {
+                    this.elements.stateListening.classList.remove('hidden');
+                    this.elements.stateListening.classList.add('flex');
+                } else if (state === 'processing') {
+                    this.elements.stateProcessing.classList.remove('hidden');
+                    this.elements.stateProcessing.classList.add('flex');
+                } else if (state === 'speaking') {
+                    this.elements.stateSpeaking.classList.remove('hidden');
+                    this.elements.stateSpeaking.classList.add('flex');
+                }
+            }
+            
+            updateMetrics(data) {
+                this.turnCount++;
+                this.elements.metricTurns.textContent = this.turnCount;
+                
+                if (data.latency_ms) {
+                    this.elements.metricLatency.textContent = `${Math.round(data.latency_ms)}ms`;
+                }
+                
+                if (data.breakdown) {
+                    this.elements.metricSTT.textContent = `${Math.round(data.breakdown.stt_ms)}ms`;
+                    this.elements.metricTTS.textContent = `${Math.round(data.breakdown.tts_ms)}ms`;
+                }
+            }
+            
+            addMessageToConversation(role, message) {
+                const conversationDiv = this.elements.conversation;
+                
+                // Remove placeholder if exists
+                if (conversationDiv.children.length === 1 && 
+                    conversationDiv.children[0].textContent.includes('Start a call')) {
+                    conversationDiv.innerHTML = '';
+                }
+                
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'conversation-item p-4 rounded-lg fade-in';
+                
+                if (role === 'user') {
+                    messageDiv.className += ' bg-blue-50 border-l-4 border-blue-500 ml-8';
+                    messageDiv.innerHTML = `
+                        <div class="flex items-start space-x-2">
+                            <div class="text-blue-600 font-semibold">👤 You:</div>
+                            <div class="text-gray-800">${this.escapeHtml(message)}</div>
+                        </div>
+                    `;
+                } else {
+                    messageDiv.className += ' bg-green-50 border-l-4 border-green-500 mr-8';
+                    messageDiv.innerHTML = `
+                        <div class="flex items-start space-x-2">
+                            <div class="text-green-600 font-semibold">🤖 AI:</div>
+                            <div class="text-gray-800">${this.escapeHtml(message)}</div>
+                        </div>
+                    `;
+                }
+                
+                conversationDiv.appendChild(messageDiv);
+                conversationDiv.scrollTop = conversationDiv.scrollHeight;
+            }
+            
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+            
+            log(...args) {
+                console.log('[ConversationalAI]', ...args);
+                
+                // Update debug panel
+                const debugContent = this.elements.debugContent;
+                const timestamp = new Date().toLocaleTimeString();
+                const logLine = `[${timestamp}] ${args.map(arg => 
+                    typeof arg === 'object' ? JSON.stringify(arg, null, 2) : arg
+                ).join(' ')}\n`;
+                
+                debugContent.textContent = (debugContent.textContent + logLine)
+                    .split('\n')
+                    .slice(-50)
+                    .join('\n');
+                
+                debugContent.scrollTop = debugContent.scrollHeight;
+            }
+        }
+        
+        // Initialize conversational AI when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new ConversationalAI();
+        });
+    </script>
+</body>
+</html>
